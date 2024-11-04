@@ -12,6 +12,7 @@
 #include "DeveloperTools/CollisionViewer.h"
 #include "DeveloperTools/EventLog.h"
 #include "HudEditor.h"
+#include "2s2h/ShipMenu.hpp"
 
 #include "SearchableMenuItems.h"
 
@@ -202,21 +203,22 @@ void BenMenu::DrawElement() {
     windowWidth = window->WorkRect.GetWidth();
 
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
-    auto sectionCount = menuEntries.size();
-    const char* headerCvar = "gSettings.Menu.SelectedHeader";
-    uint8_t headerIndex = CVarGetInteger(headerCvar, 0);
+    auto rootShipMenuPaths = ShipMenuItem::GetRootPaths();
+    auto allShipMenuItems = ShipMenuItem::GetAll();
+    auto sectionCount = rootShipMenuPaths.size();
+    const char* headerCvar = "gSettings.Menu.SelectedHeaderPath";
+    std::string headerIndex = CVarGetString(headerCvar, "Settings");
     ImVec2 pos = window->DC.CursorPos;
     float centerX = pos.x + windowWidth / 2 - (style.ItemSpacing.x * (sectionCount + 1));
     std::vector<ImVec2> headerSizes;
     float headerWidth = 200.0f + style.ItemSpacing.x;
-    for (int i = 0; i < sectionCount; i++) {
-        ImVec2 size = ImGui::CalcTextSize(menuEntries.at(i).label.c_str());
+    for (auto& path : rootShipMenuPaths) {
+        auto& item = allShipMenuItems[path];
+        ImVec2 size = ImGui::CalcTextSize(item.name.c_str());
         headerSizes.push_back(size);
         headerWidth += size.x + style.FramePadding.x * 2;
-        if (i + 1 < sectionCount) {
-            headerWidth += style.ItemSpacing.x;
-        }
     }
+    headerWidth += style.ItemSpacing.x;
     ImVec2 menuSize = { std::fminf(1280, windowWidth), std::fminf(800, windowHeight) };
     pos += window->WorkRect.GetSize() / 2 - menuSize / 2;
     ImGui::SetNextWindowPos(pos);
@@ -246,33 +248,25 @@ void BenMenu::DrawElement() {
     ImGui::BeginChild("Header Selection", headerSelSize,
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_HorizontalScrollbar);
-    for (int i = 0; i < sectionCount; i++) {
-        auto entry = menuEntries.at(i);
-        uint8_t nextIndex = i;
+    for (auto& path : rootShipMenuPaths) {
+        auto& item = allShipMenuItems[path];
         UIWidgets::PushStyleButton(menuTheme[menuThemeIndex]);
-        if (headerIndex != i) {
+        if (headerIndex != item.name) {
             ImGui::PushStyleColor(ImGuiCol_Button, { 0, 0, 0, 0 });
         }
-        if (ModernMenuHeaderEntry(entry.label)) {
+        if (ModernMenuHeaderEntry(item.name)) {
             if (autoFocus) {
                 menuSearch.Clear();
             }
-            CVarSetInteger(headerCvar, i);
+            CVarSetString(headerCvar, item.name.c_str());
             CVarSave();
-            nextIndex = i;
         }
-        if (headerIndex != i) {
+        if (headerIndex != item.name) {
             ImGui::PopStyleColor();
         }
         UIWidgets::PopStyleButton();
-        if (headerIndex == i) {
-            sidebar = entry.sidebarEntries;
-        }
-        if (i + 1 < sectionCount) {
+        if (path != *rootShipMenuPaths.rbegin()) {
             ImGui::SameLine();
-        }
-        if (nextIndex != i) {
-            headerIndex = nextIndex;
         }
     }
     std::string menuSearchText = "";
@@ -330,40 +324,33 @@ void BenMenu::DrawElement() {
     ImGui::SetNextWindowPos(pos + style.ItemSpacing * 2);
     float sidebarWidth = 200 - style.ItemSpacing.x;
 
-    const char* sidebarCvar = menuEntries.at(headerIndex).sidebarCvar;
-
-    uint8_t sectionIndex = CVarGetInteger(sidebarCvar, 0);
-    if (sectionIndex > sidebar.size() - 1)
-        sectionIndex = sidebar.size() - 1;
-    if (sectionIndex < 0)
-        sectionIndex = 0;
+    std::string sidebarCvar = "gSettings.Menu." + headerIndex + "SelectedSidebarPath";
+    std::string sectionIndex = CVarGetString(sidebarCvar.c_str(), allShipMenuItems[headerIndex].children.begin()->c_str());
+    if (allShipMenuItems[headerIndex].children.find(sectionIndex) == allShipMenuItems[headerIndex].children.end()) {
+        sectionIndex = allShipMenuItems[headerIndex].children.begin()->c_str();
+    }
     float sectionCenterX = pos.x + (sidebarWidth / 2);
     float topY = pos.y;
     ImGui::SetNextWindowSizeConstraints({ sidebarWidth, 0 }, { sidebarWidth, columnHeight });
-    ImGui::BeginChild((menuEntries.at(headerIndex).label + " Section").c_str(), { sidebarWidth, columnHeight * 3 },
+    ImGui::BeginChild((allShipMenuItems[headerIndex].path+ " Section").c_str(), { sidebarWidth, columnHeight * 3 },
                       ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize, ImGuiWindowFlags_NoTitleBar);
-    for (size_t i = 0; i < sidebar.size(); i++) {
-        auto sidebarEntry = sidebar.at(i);
-        uint8_t nextIndex = i;
+    for (auto& path : allShipMenuItems[headerIndex].children) {
+        auto& item = allShipMenuItems[path];
         UIWidgets::PushStyleButton(menuTheme[menuThemeIndex]);
-        if (sectionIndex != i) {
+        if (sectionIndex != item.path) {
             ImGui::PushStyleColor(ImGuiCol_Button, { 0, 0, 0, 0 });
         }
-        if (ModernMenuSidebarEntry(sidebarEntry.label)) {
+        if (ModernMenuSidebarEntry(item.name)) {
             if (autoFocus) {
                 menuSearch.Clear();
             }
-            CVarSetInteger(sidebarCvar, i);
+            CVarSetString(sidebarCvar.c_str(), item.path.c_str());
             CVarSave();
-            nextIndex = i;
         }
-        if (sectionIndex != i) {
+        if (sectionIndex != item.path) {
             ImGui::PopStyleColor();
         }
         UIWidgets::PopStyleButton();
-        if (nextIndex != i) {
-            sectionIndex = i;
-        }
     }
     ImGui::EndChild();
 
@@ -374,9 +361,9 @@ void BenMenu::DrawElement() {
     pos.x += 4 + style.ItemSpacing.x;
     ImGui::SetNextWindowPos(pos + style.ItemSpacing);
     float sectionWidth = menuSize.x - sidebarWidth - 4 - style.ItemSpacing.x * 4;
-    std::string sectionMenuId = sidebar.at(sectionIndex).label + " Settings";
-    int columns = sidebar.at(sectionIndex).columnCount;
-    size_t columnFuncs = sidebar.at(sectionIndex).columnWidgets.size();
+    std::string sectionMenuId = sectionIndex + " Settings";
+    int columns = 1;
+    // size_t columnFuncs = sidebar.at(sectionIndex).columnWidgets.size();
     if (windowWidth < 800) {
         columns = 1;
     }
@@ -430,24 +417,34 @@ void BenMenu::DrawElement() {
         }
 
         ImGui::EndChild();
+    } else if (true) {
+        ImGui::BeginChild("new stuff", { columnWidth, windowHeight / 2 }, ImGuiChildFlags_AutoResizeY,
+                          ImGuiWindowFlags_NoTitleBar);
+
+        auto& allShipMenuItems = ShipMenuItem::GetAll();
+        auto& item = allShipMenuItems[sectionIndex];
+
+        item.DrawChildren();
+
+        ImGui::EndChild();
     } else {
-        for (int i = 0; i < columnFuncs; i++) {
-            std::string sectionId = fmt::format("{} Column {}", sectionMenuId, i);
-            if (useColumns) {
-                ImGui::SetNextWindowSizeConstraints({ columnWidth, 0 }, { columnWidth, columnHeight });
-                ImGui::BeginChild(sectionId.c_str(), { columnWidth, windowHeight * 4 }, ImGuiChildFlags_AutoResizeY,
-                                  ImGuiWindowFlags_NoTitleBar);
-            }
-            for (auto& entry : sidebar.at(sectionIndex).columnWidgets.at(i)) {
-                SearchMenuGetItem(entry);
-            }
-            if (useColumns) {
-                ImGui::EndChild();
-            }
-            if (i < columns - 1) {
-                ImGui::SameLine();
-            }
-        }
+        // for (int i = 0; i < columnFuncs; i++) {
+        //     std::string sectionId = fmt::format("{} Column {}", sectionMenuId, i);
+        //     if (useColumns) {
+        //         ImGui::SetNextWindowSizeConstraints({ columnWidth, 0 }, { columnWidth, columnHeight });
+        //         ImGui::BeginChild(sectionId.c_str(), { columnWidth, windowHeight * 4 }, ImGuiChildFlags_AutoResizeY,
+        //                           ImGuiWindowFlags_NoTitleBar);
+        //     }
+        //     for (auto& entry : sidebar.at(sectionIndex).columnWidgets.at(i)) {
+        //         SearchMenuGetItem(entry);
+        //     }
+        //     if (useColumns) {
+        //         ImGui::EndChild();
+        //     }
+        //     if (i < columns - 1) {
+        //         ImGui::SameLine();
+        //     }
+        // }
     }
     if (!useColumns || menuSearchText.length() > 0) {
         ImGui::EndChild();
@@ -466,3 +463,32 @@ void BenMenu::DrawElement() {
     ImGui::End();
 }
 } // namespace BenGui
+
+static RegisterShipMenuItem volume(ShipMenuItem{
+    .path = "Settings/BLAH/Volume",
+    .drawFunc = [](ShipMenuItem& item) {
+        UIWidgets::CVarSliderFloat("Master Volume: %.0f %%", "gSettings.Audio.MasterVolume", 0.0f, 1.0f, 1.0f,
+                                       { .showButtons = false, .format = "", .isPercentage = true });
+
+        if (UIWidgets::CVarSliderFloat("Main Music Volume: %.0f %%", "gSettings.Audio.MainMusicVolume", 0.0f, 1.0f,
+                                        1.0f, { .showButtons = false, .format = "", .isPercentage = true })) {
+            AudioSeq_SetPortVolumeScale(SEQ_PLAYER_BGM_MAIN, CVarGetFloat("gSettings.Audio.MainMusicVolume", 1.0f));
+        }
+        if (UIWidgets::CVarSliderFloat("Sub Music Volume: %.0f %%", "gSettings.Audio.SubMusicVolume", 0.0f, 1.0f,
+                                        1.0f, { .showButtons = false, .format = "", .isPercentage = true })) {
+            AudioSeq_SetPortVolumeScale(SEQ_PLAYER_BGM_SUB, CVarGetFloat("gSettings.Audio.SubMusicVolume", 1.0f));
+        }
+        if (UIWidgets::CVarSliderFloat("Sound Effects Volume: %.0f %%", "gSettings.Audio.SoundEffectsVolume", 0.0f,
+                                        1.0f, 1.0f, { .showButtons = false, .format = "", .isPercentage = true })) {
+            AudioSeq_SetPortVolumeScale(SEQ_PLAYER_SFX, CVarGetFloat("gSettings.Audio.SoundEffectsVolume", 1.0f));
+        }
+        if (UIWidgets::CVarSliderFloat("Fanfare Volume: %.0f %%", "gSettings.Audio.FanfareVolume", 0.0f, 1.0f, 1.0f,
+                                        { .showButtons = false, .format = "", .isPercentage = true })) {
+            AudioSeq_SetPortVolumeScale(SEQ_PLAYER_FANFARE, CVarGetFloat("gSettings.Audio.FanfareVolume", 1.0f));
+        }
+        if (UIWidgets::CVarSliderFloat("Ambience Volume: %.0f %%", "gSettings.Audio.AmbienceVolume", 0.0f, 1.0f,
+                                        1.0f, { .showButtons = false, .format = "", .isPercentage = true })) {
+            AudioSeq_SetPortVolumeScale(SEQ_PLAYER_AMBIENCE, CVarGetFloat("gSettings.Audio.AmbienceVolume", 1.0f));
+        }
+    }
+});

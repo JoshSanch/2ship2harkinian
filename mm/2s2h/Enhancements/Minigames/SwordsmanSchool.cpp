@@ -1,5 +1,7 @@
-#include <libultraship/bridge.h>
+#include <libultraship/libultraship.h>
 #include "2s2h/GameInteractor/GameInteractor.h"
+#include "2s2h/BenGui/UIWidgets.hpp"
+#include "2s2h/ShipMenu.hpp"
 
 extern "C" {
 #include "overlays/actors/ovl_En_Kendo_Js/z_en_kendo_js.h"
@@ -29,3 +31,15 @@ void RegisterSwordsmanSchool() {
             }
         });
 }
+
+static RegisterShipInitFunc initFunc(RegisterSwordsmanSchool);
+
+static RegisterShipMenuItem swordsmanSchoolScore(ShipMenuCVarSliderInt{
+    .name = "Swordsman School Winning Score",
+    .tooltip = "Sets the score required to win the Swordsman School.",
+    .path = "Enhancements/Minigames/SwordsmanSchoolScore",
+    .min = 1,
+    .max = 30,
+    .defaultValue = 30,
+    .callbackFunc = [](ShipMenuItem& item) { RegisterSwordsmanSchool(); },
+});

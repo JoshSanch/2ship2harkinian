@@ -1,4 +1,5 @@
 #include "Enhancements.h"
+#include "2s2h/ShipMenu.hpp"
 
 void InitEnhancements() {
     // Camera
