@@ -172,8 +172,8 @@ void func_8088A594(EnArrow* this, PlayState* play) {
             if (this->actor.params == ARROW_TYPE_DEKU_BUBBLE) {
                 Magic_Reset(play);
             }
-            Actor_Kill(&this->actor);
-            return;
+            // Actor_Kill(&this->actor);
+            // return;
         }
 
         switch (this->actor.params) {

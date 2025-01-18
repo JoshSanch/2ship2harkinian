@@ -1109,8 +1109,8 @@ void AddEnhancements() {
                   "When acquired, places the Keaton and Fierce Deity masks on Link similarly to how he wears them in "
                   "Hyrule Warriors",
                   WIDGET_CVAR_CHECKBOX },
-                { "Time Moves when you Move", "gModes.TimeMovesWhenYouMove",
-                  "Time only moves when Link is not standing still.", WIDGET_CVAR_CHECKBOX },
+                { "Super Hot Mode", "gModes.TimeMovesWhenYouMove", "Time and actors only move when you move.",
+                  WIDGET_CVAR_CHECKBOX },
                 { "Mirrored World",
                   "gModes.MirroredWorld.Mode",
                   "Mirrors the world horizontally.",
