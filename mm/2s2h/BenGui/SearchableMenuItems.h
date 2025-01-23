@@ -10,6 +10,11 @@
 #include "variables.h"
 #include <variant>
 #include <tuple>
+#include "ShipUtils.h"
+#ifdef ENABLE_NETWORKING
+#include "2s2h/Network/Sail.h"
+#include "2s2h/Network/Anchor/Anchor.h"
+#endif
 
 extern "C" {
 #include "functions.h"
@@ -53,6 +58,8 @@ typedef enum {
     DISABLE_FOR_WARP_POINT_NOT_SET,
     DISABLE_FOR_INTRO_SKIP_OFF,
     DISABLE_FOR_RANDO,
+    DISABLE_FOR_SAIL_FORM_INVALID,
+    DISABLE_FOR_SAIL_ENABLED,
 } DisableOption;
 
 struct widgetInfo;
@@ -76,6 +83,8 @@ typedef enum {
     WIDGET_CVAR_COMBOBOX,
     WIDGET_CVAR_SLIDER_INT,
     WIDGET_CVAR_SLIDER_FLOAT,
+    WIDGET_CVAR_INPUT_STRING,
+    WIDGET_CVAR_INPUT_INT,
     WIDGET_BUTTON,
     WIDGET_COLOR_24, // color picker without alpha
     WIDGET_COLOR_32, // color picker with alpha
@@ -83,6 +92,7 @@ typedef enum {
     WIDGET_SEPARATOR,
     WIDGET_SEPARATOR_TEXT,
     WIDGET_TEXT,
+    WIDGET_ANCHOR, // Renders the entire anchor menu
     WIDGET_WINDOW_BUTTON,
     WIDGET_AUDIO_BACKEND, // needed because of special operations that can't be handled easily with the normal combobox
                           // widget
@@ -356,6 +366,15 @@ static std::map<DisableOption, disabledInfo> disabledMap = {
         "Intro Skip Not Selected" } },
     { DISABLE_FOR_RANDO,
       { [](disabledInfo& info) -> bool { return IS_RANDO; }, "This is incompatible with Randomizer saves" } },
+    { DISABLE_FOR_SAIL_FORM_INVALID,
+      { [](disabledInfo& info) -> bool {
+           return !(!isStringEmpty(CVarGetString("gNetwork.Sail.Host", "127.0.0.1")) &&
+                    CVarGetInteger("gNetwork.Sail.Port", 43385) > 1024 &&
+                    CVarGetInteger("gNetwork.Sail.Port", 43385) < 65535);
+       },
+        "Invalid Host/Port" } },
+    { DISABLE_FOR_SAIL_ENABLED,
+      { [](disabledInfo& info) -> bool { return Sail::Instance->isEnabled; }, "Sail is Enabled" } },
 };
 
 std::unordered_map<int32_t, const char*> menuThemeOptions = {
@@ -833,6 +852,79 @@ void AddSettings() {
                   .widgetOptions = { .min = 1.0f, .max = 5.0f, .defaultVariant = 1.0f, .format = "%.1f", .step = 0.1f },
                   .widgetCallback = [](widgetInfo& info) { DisplayOverlayInitSettings(); } },
             } } });
+
+#ifdef ENABLE_NETWORKING
+    // Network
+    settingsSidebar.push_back(
+        { "Network",
+          2,
+          { {
+                { .widgetName = "Sail", .widgetType = WIDGET_SEPARATOR_TEXT },
+                { "Host",
+                  "gNetwork.Sail.Host",
+                  "",
+                  WIDGET_CVAR_INPUT_STRING,
+                  { .defaultVariant = "127.0.0.1" },
+                  {},
+                  [](widgetInfo& info) {
+                      if (disabledMap.at(DISABLE_FOR_SAIL_ENABLED).active) {
+                          info.activeDisables.push_back(DISABLE_FOR_SAIL_ENABLED);
+                      }
+                  } },
+                { "Port",
+                  "gNetwork.Sail.Port",
+                  "",
+                  WIDGET_CVAR_INPUT_INT,
+                  { .defaultVariant = 43385 },
+                  {},
+                  [](widgetInfo& info) {
+                      if (disabledMap.at(DISABLE_FOR_SAIL_ENABLED).active) {
+                          info.activeDisables.push_back(DISABLE_FOR_SAIL_ENABLED);
+                      }
+                  } },
+                { "Connect",
+                  "",
+                  "Connect/Disconnect to the Sail server.",
+                  WIDGET_BUTTON,
+                  {},
+                  [](widgetInfo& info) {
+                      if (Sail::Instance->isEnabled) {
+                          CVarClear("gNetwork.Sail.Enabled");
+                          Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
+                          Sail::Instance->Disable();
+                      } else {
+                          CVarSetInteger("gNetwork.Sail.Enabled", 1);
+                          Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
+                          Sail::Instance->Enable();
+                      }
+                  },
+                  [](widgetInfo& info) {
+                      if (Sail::Instance->isEnabled) {
+                          info.widgetName = "Disconnect";
+                      } else {
+                          info.widgetName = "Connect";
+                      }
+                      if (disabledMap.at(DISABLE_FOR_SAIL_FORM_INVALID).active)
+                          info.activeDisables.push_back(DISABLE_FOR_SAIL_FORM_INVALID);
+                  } },
+                { "Connected",
+                  "",
+                  "Displays the current connection status.",
+                  WIDGET_TEXT,
+                  {},
+                  {},
+                  [](widgetInfo& info) {
+                      if (Sail::Instance->isEnabled && Sail::Instance->isConnected) {
+                          info.widgetName = "Connected";
+                      } else if (Sail::Instance->isEnabled) {
+                          info.widgetName = "Connecting...";
+                      } else {
+                          info.isHidden = true;
+                      }
+                  } },
+            },
+            { { "Anchor", "", "Anchor", WIDGET_ANCHOR } } } });
+#endif
 
     if (CVarGetInteger("gSettings.SidebarSearch", 0)) {
         settingsSidebar.insert(settingsSidebar.begin() + searchSidebarIndex, searchSidebarEntry);
@@ -1958,6 +2050,9 @@ void SearchMenuGetItem(widgetInfo& widget) {
                     UpdateWindowBackendObjects();
                 }
             } break;
+            case WIDGET_ANCHOR:
+                Anchor::Instance->DrawMenu();
+                break;
             case WIDGET_SEPARATOR:
                 ImGui::Separator();
                 break;
@@ -2011,6 +2106,35 @@ void SearchMenuGetItem(widgetInfo& widget) {
                     }
                 }
                 break;
+            case WIDGET_CVAR_INPUT_STRING: {
+                if (UIWidgets::CVarInputString(
+                        widget.widgetName.c_str(), widget.widgetCVar,
+                        {
+                            .color = menuTheme[menuThemeIndex],
+                            .tooltip = widget.widgetTooltip,
+                            .disabled = disabledValue,
+                            .disabledTooltip = disabledTooltip,
+                            .defaultValue = std::get<const char*>(widget.widgetOptions.defaultVariant),
+                        })) {
+                    if (widget.widgetCallback != nullptr) {
+                        widget.widgetCallback(widget);
+                    }
+                }
+            } break;
+            case WIDGET_CVAR_INPUT_INT: {
+                if (UIWidgets::CVarInputInt(widget.widgetName.c_str(), widget.widgetCVar,
+                                            {
+                                                .color = menuTheme[menuThemeIndex],
+                                                .tooltip = widget.widgetTooltip,
+                                                .disabled = disabledValue,
+                                                .disabledTooltip = disabledTooltip,
+                                                .defaultValue = std::get<int32_t>(widget.widgetOptions.defaultVariant),
+                                            })) {
+                    if (widget.widgetCallback != nullptr) {
+                        widget.widgetCallback(widget);
+                    }
+                }
+            } break;
             case WIDGET_SLIDER_INT: {
                 int32_t* pointer = std::get<int32_t*>(widget.widgetOptions.valuePointer);
                 if (pointer == nullptr) {
