@@ -8,6 +8,8 @@
 #include "2s2h/BenGui/UIWidgets.hpp"
 #include "2s2h/NameTag/NameTag.h"
 #include "2s2h/ShipUtils.h"
+#include "2s2h/Rando/Spoiler/Spoiler.h"
+#include "2s2h/Rando/MiscBehavior/MiscBehavior.h"
 
 extern "C" {
 #include "variables.h"
@@ -18,7 +20,7 @@ extern PlayState* gPlayState;
 // MARK: - Overrides
 
 void Anchor::Enable() {
-    Network::Enable(CVarGetString("gNetwork.Anchor.Host", "anchor.proxysaw.dev"), CVarGetInteger("gNetwork.Anchor.Port", 43385));
+    Network::Enable(CVarGetString("gNetwork.Anchor.Host", "anchor.proxysaw.dev"), CVarGetInteger("gNetwork.Anchor.Port", 43383));
     ownClientId = CVarGetInteger("gNetwork.Anchor.LastClientId", 0);
     roomState.ownerClientId = 0;
 }
@@ -27,6 +29,7 @@ void Anchor::Disable() {
     Network::Disable();
 
     clients.clear();
+    roomState.teams.clear();
     RefreshClientActors();
 }
 
@@ -90,6 +93,7 @@ void Anchor::OnIncomingJson(nlohmann::json payload) {
     else if (packetType == REQUEST_TEAM_STATE)       HandlePacket_RequestTeamState(payload);
     else if (packetType == REQUEST_TELEPORT)         HandlePacket_RequestTeleport(payload);
     else if (packetType == SERVER_MESSAGE)           HandlePacket_ServerMessage(payload);
+    else if (packetType == SET_CHECK_STATUS)         HandlePacket_SetCheckStatus(payload);
     else if (packetType == SET_FLAG)                 HandlePacket_SetFlag(payload);
     else if (packetType == TELEPORT_TO)              HandlePacket_TeleportTo(payload);
     else if (packetType == UNSET_FLAG)               HandlePacket_UnsetFlag(payload);
@@ -98,25 +102,9 @@ void Anchor::OnIncomingJson(nlohmann::json payload) {
     else if (packetType == UPDATE_DUNGEON_ITEMS)     HandlePacket_UpdateDungeonItems(payload);
 }
 
-// Macros to let us easily register and unregister functions when the anchor is enabled/disabled
-#define HOOK(hook, condition, body) \
-    static HOOK_ID hook = 0; \
-    GameInteractor::Instance->UnregisterGameHook<GameInteractor::hook>(hook); \
-    hook = 0; \
-    if (condition) { \
-        hook = GameInteractor::Instance->RegisterGameHook<GameInteractor::hook>(body); \
-    }
-
-#define HOOK_FOR_ID(hook, condition, id, body) \
-    static HOOK_ID hook = 0; \
-    GameInteractor::Instance->UnregisterGameHookForID<GameInteractor::hook>(hook); \
-    hook = 0; \
-    if (condition) { \
-        hook = GameInteractor::Instance->RegisterGameHookForID<GameInteractor::hook>(id, body); \
-    }
-
 void Anchor::RegisterHooks() {
-    HOOK(OnSceneSpawnActors, isConnected, [&]() {
+    COND_HOOK(OnSceneSpawnActors, isConnected, [&]() {
+        SPDLOG_INFO("OnSceneSpawnActors");
         SendPacket_UpdateClientState();
 
         if (IsSaveLoaded()) {
@@ -128,7 +116,7 @@ void Anchor::RegisterHooks() {
     //     SendPacket_UpdateClientState();
     // });
 
-    HOOK_FOR_ID(ShouldActorInit, isConnected, ACTOR_PLAYER, [&](void* actorRef, bool* should) {
+    COND_ID_HOOK(ShouldActorInit, ACTOR_PLAYER, isConnected, [&](void* actorRef, bool* should) {
         Actor* actor = (Actor*)actorRef;
 
         if (refreshingActors) {
@@ -143,52 +131,45 @@ void Anchor::RegisterHooks() {
         }
     });
 
-    HOOK_FOR_ID(OnActorUpdate, isConnected, ACTOR_PLAYER, [&](Actor* actor) {
-        if (justLoadedSave) {
-            justLoadedSave = false;
-            SendPacket_RequestTeamState();
-        }
+    COND_ID_HOOK(OnActorUpdate, ACTOR_PLAYER, isConnected, [&](Actor* actor) {
         SendPacket_PlayerUpdate();
     });
 
-    HOOK(OnPlayerSfx, isConnected, [&](u16 sfxId) {
+    COND_HOOK(OnPlayerSfx, isConnected, [&](u16 sfxId) {
         SendPacket_PlayerSfx(sfxId);
     });
 
-    HOOK(OnSaveLoad, isConnected, [&](s16 fileNum) {
-        justLoadedSave = true;
+    COND_HOOK(OnSaveLoad, isConnected, [&](s16 fileNum) {
+        SendPacket_RequestTeamState();
     });
 
-    // HOOK(OnSaveFile, isConnected, [&](s16 fileNum, int sectionID) {
-    //     if (sectionID == 0) {
-    //         SendPacket_UpdateTeamState();
-    //     }
-    // });
+    COND_HOOK(AfterOwlSave, isConnected, [&]() {
+        if (gPlayState != NULL) {
+            SendPacket_UpdateTeamState(CVarGetString("gNetwork.Anchor.TeamId", "default"));
+        }
+    });
 
-    HOOK(OnFlagSet, isConnected, [&](s16 flagType, s16 flag) {
+    COND_HOOK(AfterEndOfCycleSave, isConnected, [&]() {
+        if (gPlayState != NULL) {
+            SendPacket_UpdateTeamState(CVarGetString("gNetwork.Anchor.TeamId", "default"));
+        }
+    });
+
+    COND_HOOK(OnFlagSet, isConnected, [&](s16 flagType, s16 flag) {
         SendPacket_SetFlag(SCENE_MAX, flagType, flag);
     });
 
-    HOOK(OnFlagUnset, isConnected, [&](s16 flagType, s16 flag) {
+    COND_HOOK(OnFlagUnset, isConnected, [&](s16 flagType, s16 flag) {
         SendPacket_UnsetFlag(SCENE_MAX, flagType, flag);
     });
 
-    HOOK(OnSceneFlagSet, isConnected, [&](s16 sceneId, s16 flagType, s16 flag) { 
+    COND_HOOK(OnSceneFlagSet, isConnected, [&](s16 sceneId, s16 flagType, s16 flag) { 
         SendPacket_SetFlag(sceneId, flagType, flag);
     });
 
-    HOOK(OnSceneFlagUnset, isConnected, [&](s16 sceneId, s16 flagType, s16 flag) {
+    COND_HOOK(OnSceneFlagUnset, isConnected, [&](s16 sceneId, s16 flagType, s16 flag) {
         SendPacket_UnsetFlag(sceneId, flagType, flag);
     });
-
-    // HOOK(OnItemReceive, isConnected, [&](GetItemEntry itemEntry) {
-    //     // Ignore vanilla dungeon items and master sword
-    //     if (itemEntry.modIndex == MOD_NONE && ((itemEntry.itemId >= ITEM_KEY_BOSS && itemEntry.itemId <= ITEM_KEY_SMALL) || itemEntry.itemId == ITEM_SWORD_MASTER)) {
-    //         return;
-    //     }
-
-    //     SendPacket_GiveItem(itemEntry.tableId, itemEntry.getItemId);
-    // });
 }
 
 // MARK: - Misc/Helpers
@@ -248,81 +229,104 @@ bool Anchor::IsSaveLoaded() {
     return true;
 }
 
+static std::set<std::string> teams;
+void Anchor::InitializeMultiWorld() {
+    roomState.teams = std::vector<std::string>(teams.begin(), teams.end());
+    teams.clear();
+    SendPacket_UpdateRoomState();
+
+    std::string previousSpoiler = CVarGetString("gRando.SpoilerFile", "");
+    int previousSpoilerFileIndex = CVarGetInteger("gRando.SpoilerFileIndex", 0);
+    CVarSetInteger("gRando.SpoilerFileIndex", -1);
+
+    std::vector<SaveContext> worlds;
+    std::vector<std::pair<RandoCheckId, int>> checkPool;
+    std::vector<std::pair<RandoItemId, int>> itemPool;
+
+    for (int i = 0; i < roomState.teams.size(); i++) {
+        CVarSetString("gRando.SpoilerFile", roomState.teams[i].c_str());
+        Sram_InitNewSave();
+        // nlohmann::json spoiler = Rando::Spoiler::LoadFromFile(roomState.teams[i]);
+        // Rando::Spoiler::ApplyToSaveContext(spoiler);
+        Rando::MiscBehavior::OnFileCreate(0);
+        for (auto& [randoCheckId, randoStaticCheck] : Rando::StaticData::Checks) {
+            if (RANDO_SAVE_CHECKS[randoCheckId].shuffled) {
+                checkPool.push_back({ randoCheckId, i });
+                itemPool.push_back({ RANDO_SAVE_CHECKS[randoCheckId].randoItemId, i });
+            }
+        }
+
+        SaveContext save = gSaveContext;
+        worlds.push_back(save);
+    }
+
+    for (size_t i = 0; i < itemPool.size(); i++) {
+        std::swap(itemPool[i], itemPool[Ship_Random(0, itemPool.size() - 1)]);
+    }
+
+    for (int i = 0; i < roomState.teams.size(); i++) {
+        gSaveContext = worlds[i];
+        for (size_t j = 0; j < checkPool.size(); j++) {
+            if (checkPool[j].second != i) {
+                continue;
+            }
+            RANDO_SAVE_CHECKS[checkPool[j].first].randoItemId = itemPool[j].first;
+            RANDO_SAVE_CHECKS[checkPool[j].first].multiWorldTeamIndex = itemPool[j].second;
+        }
+
+        SendPacket_UpdateTeamState(roomState.teams[i]);
+    }
+
+    CVarSetString("gRando.SpoilerFile", previousSpoiler.c_str());
+    CVarSetInteger("gRando.SpoilerFileIndex", previousSpoilerFileIndex);
+}
+
 // MARK: - UI
 
 void Anchor::DrawMenu() {
     ImGui::PushID("Anchor");
 
     ImGui::SeparatorText("Anchor");
-    UIWidgets::Tooltip("Anchor is a networking protocol designed to facilitate remote "
-                       "control of the Ship of Harkinian client. It is intended to "
-                       "be utilized alongside a Anchor server, for which we provide a "
-                       "few straightforward implementations on our GitHub. The current "
-                       "implementations available allow integration with Twitch chat "
-                       "and SAMMI Bot, feel free to contribute your own!\n"
-                       "\n"
-                       "Click the question mark to copy the link to the Anchor Github "
-                       "page to your clipboard.");
-    if (ImGui::IsItemClicked()) {
-        ImGui::SetClipboardText("https://github.com/HarbourMasters/sail");
-    }
 
-    static std::string ip = CVarGetString("gNetwork.Anchor.Host", "127.0.0.1");
-    static uint16_t port = CVarGetInteger("gNetwork.Anchor.Port", 43385);
-    static std::string AnchorName = CVarGetString("gNetwork.Anchor.Name", "");
-    static std::string anchorRoomId = CVarGetString("gNetwork.Anchor.RoomId", "");
-    bool isFormValid = !isStringEmpty(CVarGetString("gNetwork.Anchor.Host", "127.0.0.1")) && port > 1024 &&
-                       port < 65535 && !isStringEmpty(CVarGetString("gNetwork.Anchor.Name", "")) &&
-                       !isStringEmpty(CVarGetString("gNetwork.Anchor.RoomId", ""));
+    std::string host = CVarGetString("gNetwork.Anchor.Host", "anchor.proxysaw.dev");
+    uint16_t port = CVarGetInteger("gNetwork.Anchor.Port", 43383);
+    std::string anchorName = CVarGetString("gNetwork.Anchor.Name", "");
+    std::string anchorTeamId = CVarGetString("gNetwork.Anchor.TeamId", "default");
+    std::string anchorRoomId = CVarGetString("gNetwork.Anchor.RoomId", "");
+    bool isFormValid = !isStringEmpty(host) && port > 1024 &&
+                       port < 65535 && !isStringEmpty(anchorName) &&
+                       !isStringEmpty(anchorRoomId) &&
+                        !isStringEmpty(anchorTeamId);
 
     ImGui::BeginDisabled(isEnabled);
 
-    ImGui::Text("Remote IP & Port");
-    UIWidgets::PushStyleSlider();
-    if (ImGui::InputText("##gNetwork.Anchor.Host", (char*)ip.c_str(), ip.capacity() + 1)) {
-        CVarSetString("gNetwork.Anchor.Host", ip.c_str());
+    if (UIWidgets::InputString("Host", &host)) {
+        CVarSetString("gNetwork.Anchor.Host", host.c_str());
         Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
     }
 
-    ImGui::SameLine();
-    ImGui::PushItemWidth(ImGui::GetFontSize() * 5);
+    ImGui::Text("Port");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    UIWidgets::PushStyleSlider();
     if (ImGui::InputScalar("##gNetwork.Anchor.Port", ImGuiDataType_U16, &port)) {
         CVarSetInteger("gNetwork.Anchor.Port", port);
         Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
     }
+    UIWidgets::PopStyleSlider();
 
-    ImGui::Text("Fairy Color & Name");
-    static Color_RGBA8 color = CVarGetColor("gNetwork.Anchor.Color", { 100, 255, 100, 255 });
-    static ImVec4 colorVec = ImVec4(color.r / 255.0, color.g / 255.0, color.b / 255.0, 1);
-    if (ImGui::ColorEdit3("##gNetwork.Anchor.Color", (float*)&colorVec,
-                          ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
-        color.r = colorVec.x * 255.0;
-        color.g = colorVec.y * 255.0;
-        color.b = colorVec.z * 255.0;
-
-        CVarSetColor("gNetwork.Anchor.Color", color);
+    if (UIWidgets::InputString("Name", &anchorName)) {
+        CVarSetString("gNetwork.Anchor.Name", anchorName.c_str());
         Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
     }
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    if (ImGui::InputText("##gNetwork.Anchor.Name", (char*)AnchorName.c_str(), AnchorName.capacity() + 1)) {
-        CVarSetString("gNetwork.Anchor.Name", AnchorName.c_str());
+    if (UIWidgets::InputString("Team ID", &anchorTeamId)) {
+        CVarSetString("gNetwork.Anchor.TeamId", anchorTeamId.c_str());
         Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
     }
-    ImGui::Text("Room ID");
-    int flags = 0;
-    if (isEnabled) {
-        flags = ImGuiInputTextFlags_Password;
-    }
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    if (ImGui::InputText("##gNetwork.Anchor.RoomId", (char*)anchorRoomId.c_str(), anchorRoomId.capacity() + 1, flags)) {
+    if (UIWidgets::InputString("Room ID", &anchorRoomId)) {
         CVarSetString("gNetwork.Anchor.RoomId", anchorRoomId.c_str());
         Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
     }
 
-    UIWidgets::PopStyleSlider();
-
-    ImGui::PopItemWidth();
     ImGui::EndDisabled();
 
     ImGui::Spacing();
@@ -347,14 +351,69 @@ void Anchor::DrawMenu() {
         if (isConnected) {
             ImGui::Text("Connected");
 
+            if (roomState.ownerClientId == ownClientId) {
+                if (ImGui::CollapsingHeader("Room Settings")) {
+                    static const char* pvpModes[3] = { "Off", "On", "On + Friendly Fire" };
+                    if (UIWidgets::CVarCombobox("PvP Mode", "gNetwork.Anchor.RoomSettings.pvpMode", pvpModes)) {
+                        SendPacket_UpdateRoomState();
+                    }
+                    ImGui::SeparatorText("Multi-World");
+
+                    if (roomState.teams.empty()) {
+                        std::string teamToRemove;
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::Text("Teams:");
+                        ImGui::SameLine();
+                        if (UIWidgets::Button(ICON_FA_PLUS, { .color = UIWidgets::Colors::Green, .size = UIWidgets::Sizes::Inline })) {
+                            ImGui::OpenPopup("TeamPopup");
+                        }
+                        for (auto& team : teams) {
+                            ImGui::AlignTextToFramePadding();
+                            ImGui::Text("%s", team.c_str()); 
+                            ImGui::SameLine();
+                            if (UIWidgets::Button(ICON_FA_TIMES, { .color = UIWidgets::Colors::Red, .size = UIWidgets::Sizes::Inline })) {
+                                teamToRemove = team;
+                            }
+                        }
+                        if (!teamToRemove.empty()) {
+                            teams.erase(teamToRemove);
+                            teamToRemove.clear();
+                        }
+                        if (ImGui::BeginPopup("TeamPopup")) {
+                            ImGui::SeparatorText("Available Spoiler Logs:");
+                            for (auto& spoilerFile : Rando::Spoiler::spoilerOptions) {
+                                if (spoilerFile == "Generate New Seed" || teams.contains(spoilerFile)) {
+                                    continue;
+                                }
+
+                                if (ImGui::Selectable(spoilerFile.c_str())) {
+                                    teams.insert(spoilerFile);
+                                }
+                            }
+                            ImGui::EndPopup();
+                        }
+                        if (UIWidgets::Button("Initialize Multi-World", { .disabled = teams.size() < 2 || IsSaveLoaded(), .disabledTooltip = "You need at least 2 teams to initialize multi-world, and you must not have a save loaded" })) {
+                            InitializeMultiWorld();
+                        }
+                    } else {
+                        ImGui::Text("Teams:");
+                        for (auto& team : roomState.teams) {
+                            ImGui::Text("%s", team.c_str());
+                        }
+                    }
+                }
+            }
+
             ImGui::Text("Players in Room:");
-            // ImGui::Text("%s - %s", CVarGetString("gNetwork.Anchor.Name", ""),
-                        // getSceneName(gPlayState == NULL ? SCENE_MAX : gPlayState->sceneId));
+            ImGui::Text("[%d] %s%s", ownClientId, CVarGetString("gNetwork.Anchor.Name", ""), IsSaveLoaded() ? (std::string(" - ") + Ship_GetSceneName(gPlayState->sceneId)).c_str() : "");
             for (auto& [clientId, client] : Anchor::clients) {
                 if (client.self) {
-                    ImGui::TextColored(ImVec4(0.8, 1, 0.8, 1), "[%d] %s - %s", client.clientId, client.name.c_str(), getSceneName(gPlayState == NULL ? SCENE_MAX : gPlayState->sceneId));
+                    continue;
+                }
+                if (client.online) {
+                    ImGui::TextColored(ImVec4(1, 1, 1, 1), "[%d] %s - %s", client.clientId, client.name.c_str(), Ship_GetSceneName(client.sceneId));
                 } else {
-                    ImGui::TextColored(ImVec4(1, 1, 1, 1), "[%d] %s - %s", client.clientId, client.name.c_str(), getSceneName(client.sceneId));
+                    ImGui::TextColored(ImVec4(1, 1, 1, 1), "[%d] %s - %s", client.clientId, client.name.c_str(), Ship_GetSceneName(client.sceneId));
                 }
                 // if (client.clientVersion != Anchor::clientVersion) {
                 //     ImGui::SameLine();
@@ -384,144 +443,6 @@ void Anchor::DrawMenu() {
             ImGui::Text("Connecting...");
         }
     }
-
-    // Stuff from OOT BELOW
-
-    // std::string host = CVarGetString("gNetwork.Anchor.Host", "anchor.proxysaw.dev");
-    // uint16_t port = CVarGetInteger("gNetwork.Anchor.Port", 43385);
-    // std::string anchorTeamId = CVarGetString("gNetwork.Anchor.TeamId", "default");
-    // std::string anchorRoomId = CVarGetString("gNetwork.Anchor.RoomId", "");
-    // std::string anchorName = CVarGetString("gNetwork.Anchor.Name", "");
-    // bool isFormValid = !SohUtils::IsStringEmpty(host) && port > 1024 && port < 65535 &&
-    //     !SohUtils::IsStringEmpty(anchorRoomId) && !SohUtils::IsStringEmpty(anchorName);
-
-    // ImGui::SeparatorText("Anchor");
-    // // UIWidgets::Tooltip("Anchor Stuff");
-    // if (ImGui::IsItemClicked()) {
-    //     // ImGui::SetClipboardText("https://github.com/garrettjoecox/anchor");
-    // }
-
-    // ImGui::BeginDisabled(isEnabled);
-    // ImGui::Text("Host & Port");
-    // if (UIWidgets::InputString("##Host", &host)) {
-    //     CVarSetString("gNetwork.Anchor.Host", host.c_str());
-    //     Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
-    // }
-
-    // ImGui::SameLine();
-    // ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5);
-    // if (ImGui::InputScalar("##Port", ImGuiDataType_U16, &port)) {
-    //     CVarSetInteger("gNetwork.Anchor.Port", port);
-    //     Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
-    // }
-
-    // ImGui::Text("Tunic Color & Name");
-    // static Color_RGBA8 color = CVarGetColor("gNetwork.Anchor.Color", { 100, 255, 100, 255 });
-    // static ImVec4 colorVec = ImVec4(color.r / 255.0, color.g / 255.0, color.b / 255.0, 1);
-    // if (ImGui::ColorEdit3("##Color", (float*)&colorVec,
-    //                       ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
-    //     color.r = colorVec.x * 255.0;
-    //     color.g = colorVec.y * 255.0;
-    //     color.b = colorVec.z * 255.0;
-
-    //     CVarSetColor("gNetwork.Anchor.Color", color);
-    //     Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
-    // }
-    // ImGui::SameLine();
-    // ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    // if (UIWidgets::InputString("##Name", &anchorName)) {
-    //     CVarSetString("gNetwork.Anchor.Name", anchorName.c_str());
-    //     Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
-    // }
-    // ImGui::Text("Team ID - Ignore if not using teams");
-    // ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    // if (UIWidgets::InputString("##TeamId", &anchorTeamId)) {
-    //     CVarSetString("gNetwork.Anchor.TeamId", anchorTeamId.c_str());
-    //     Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
-    // }
-    // ImGui::Text("Room ID");
-    // ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    // if (UIWidgets::InputString("##RoomId", &anchorRoomId, isEnabled ? ImGuiInputTextFlags_Password : 0)) {
-    //     CVarSetString("gNetwork.Anchor.RoomId", anchorRoomId.c_str());
-    //     Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
-    // }
-    // ImGui::EndDisabled();
-
-    // ImGui::Spacing();
-
-    // ImGui::BeginDisabled(!isFormValid);
-    // const char* buttonLabel = isEnabled ? "Disable" : "Enable";
-    // if (ImGui::Button(buttonLabel, ImVec2(-1.0f, 0.0f))) {
-    //     if (isEnabled) {
-    //         CVarClear("gNetwork.Anchor.Enabled");
-    //         Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
-    //         Disable();
-    //     } else {
-    //         CVarSetInteger("gNetwork.Anchor.Enabled", 1);
-    //         Ship::Context::GetInstance()->GetWindow()->GetGui()->SaveConsoleVariablesOnNextTick();
-    //         Enable();
-    //     }
-    // }
-    // ImGui::EndDisabled();
-
-    // if (isEnabled) {
-    //     ImGui::Spacing();
-    //     if (isConnected) {
-    //         ImGui::Text("Connected");
-
-    //         if (roomState.ownerClientId == ownClientId) {
-    //             if (ImGui::BeginMenu("Room Settings")) {
-    //                 ImGui::Text("PvP Mode");
-    //                 static const char* pvpModes[3] = { "Off", "On", "On + Friendly Fire" };
-    //                 if (UIWidgets::EnhancementCombobox("gNetwork.Anchor.RoomSettings.pvpMode", pvpModes, 0)) {
-    //                     SendPacket_UpdateRoomState();
-    //                 }
-    //                 ImGui::EndMenu();
-    //             }
-    //         }
-
-    //         ImGui::Text("Players in Room:");
-    //         ImGui::Text("%s%s", CVarGetString("gNetwork.Anchor.Name", ""), IsSaveLoaded() ? (" - " + SohUtils::GetSceneName(gPlayState->sceneId)).c_str() : "");
-    //         for (auto& [clientId, client] : Anchor::clients) {
-    //             if (client.self) {
-    //                 continue;
-    //             }
-
-    //             std::string location = " - " + SohUtils::GetSceneName(client.sceneId);
-    //             if (!client.online) {
-    //                 location = " - offline";
-    //             } else if (!client.isSaveLoaded) {
-    //                 location = "";
-    //             }
-    //             ImGui::TextColored(client.online ? ImVec4(1, 1, 1, 1) : ImVec4(1, 1, 1, 0.5f), "%s%s", client.name.c_str(), location.c_str());
-    //             if (client.clientVersion != Anchor::clientVersion) {
-    //                 ImGui::SameLine();
-    //                 ImGui::TextColored(ImVec4(1, 0, 0, 1), ICON_FA_EXCLAMATION_TRIANGLE);
-    //                 if (ImGui::IsItemHovered()) {
-    //                     ImGui::BeginTooltip();
-    //                     ImGui::Text("Incompatible version! Will not work together!");
-    //                     ImGui::Text("Yours: %s", Anchor::clientVersion.c_str());
-    //                     ImGui::Text("Theirs: %s", client.clientVersion.c_str());
-    //                     ImGui::EndTooltip();
-    //                 }
-    //             }
-    //             uint32_t seed = IS_RANDO ? Rando::Context::GetInstance()->GetSettings()->GetSeed() : 0;
-    //             if (client.isSaveLoaded && IsSaveLoaded() && client.seed != seed && client.online) {
-    //                 ImGui::SameLine();
-    //                 ImGui::TextColored(ImVec4(1, 0, 0, 1), ICON_FA_EXCLAMATION_TRIANGLE);
-    //                 if (ImGui::IsItemHovered()) {
-    //                     ImGui::BeginTooltip();
-    //                     ImGui::Text("Seed mismatch! Continuing will break things!");
-    //                     ImGui::Text("Yours: %u", seed);
-    //                     ImGui::Text("Theirs: %u", client.seed);
-    //                     ImGui::EndTooltip();
-    //                 }
-    //             }
-    //         }
-    //     } else {
-    //         ImGui::Text("Connecting...");
-    //     }
-    // }
 
     ImGui::PopID();
 }

@@ -6,6 +6,7 @@
 #include "2s2h/BenGui/Notification.h"
 #include "2s2h/Rando/StaticData/StaticData.h"
 #include "2s2h/ShipUtils.h"
+#include "2s2h/Network/Anchor/Anchor.h"
 
 extern "C" {
 #include "variables.h"
@@ -44,16 +45,21 @@ void Rando::MiscBehavior::CheckQueue() {
                         auto& randoSaveCheck = RANDO_SAVE_CHECKS[CUSTOM_ITEM_PARAM];
                         RandoItemId randoItemId =
                             Rando::ConvertItem(randoSaveCheck.randoItemId, (RandoCheckId)CUSTOM_ITEM_PARAM);
-                        std::string msg = "You received";
-                        if (!Ship_IsCStringEmpty(Rando::StaticData::Items[randoItemId].article)) {
-                            msg += " ";
-                            msg += Rando::StaticData::Items[randoItemId].article;
-                        }
-
+                        std::string msg = "You found";
                         std::string itemName = Rando::StaticData::Items[randoItemId].name;
-                        if (randoItemId == RI_JUNK) {
-                            randoItemId = Rando::CurrentJunkItem();
-                            itemName += std::string(" (") + Rando::StaticData::Items[randoItemId].name + ")";
+
+                        bool isForYou = Anchor::Instance->roomState.teams.size() < 2 || Anchor::Instance->roomState.teams[randoSaveCheck.multiWorldTeamIndex] == std::string(CVarGetString("gNetwork.Anchor.TeamId", "default"));
+                        if (!isForYou) {
+                            msg += " " + Anchor::Instance->roomState.teams[randoSaveCheck.multiWorldTeamIndex] + "'s";
+                        } else {
+                            if (!Ship_IsCStringEmpty(Rando::StaticData::Items[randoItemId].article)) {
+                                msg += " ";
+                                msg += Rando::StaticData::Items[randoItemId].article;
+                            }
+                            if (randoItemId == RI_JUNK) {
+                                randoItemId = Rando::CurrentJunkItem();
+                                itemName += std::string(" (") + Rando::StaticData::Items[randoItemId].name + ")";
+                            }
                         }
 
                         CustomMessage::Entry entry = {
@@ -74,10 +80,16 @@ void Rando::MiscBehavior::CheckQueue() {
                                 .suffix = itemName,
                             });
                         }
-                        Rando::GiveItem(randoItemId);
                         randoSaveCheck.cycleObtained = true;
                         randoSaveCheck.obtained = true;
                         randoSaveCheck.eligible = false;
+                        if (isForYou) {
+                            Rando::GiveItem(randoItemId);
+                            Anchor::Instance->SendPacket_GiveItem(1, randoItemId);
+                            Anchor::Instance->SendPacket_SetCheckStatus((RandoCheckId)CUSTOM_ITEM_PARAM);
+                        } else {
+                            Anchor::Instance->SendPacket_GiveItem(1, randoItemId, Anchor::Instance->roomState.teams[randoSaveCheck.multiWorldTeamIndex]);
+                        }
                         queued = false;
                         CUSTOM_ITEM_PARAM = randoItemId;
                     },

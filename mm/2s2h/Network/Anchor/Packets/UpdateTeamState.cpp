@@ -6,6 +6,7 @@
 #include <libultraship/libultraship.h>
 #include "2s2h/BenPort.h"
 #include "2s2h/BenGui/Notification.h"
+#include "2s2h/Rando/Rando.h"
 
 extern "C" {
 #include "variables.h"
@@ -25,20 +26,33 @@ extern PlayState* gPlayState;
  * When receiving this packet, if there is items in the team queue, we will play them back in order.
  */
 
-void Anchor::SendPacket_UpdateTeamState() {
-    if (!IsSaveLoaded()) {
-        return;
-    }
-
+void Anchor::SendPacket_UpdateTeamState(std::string targetTeamId) {
     json payload;
     payload["type"] = UPDATE_TEAM_STATE;
-    payload["targetTeamId"] = CVarGetString("gNetwork.Anchor.TeamId", "default");
+    payload["targetTeamId"] = targetTeamId;
 
     // Assume the team queue has been emptied, so clear it
     payload["queue"] = json::array();
 
-    payload["state"] = gSaveContext;
+    payload["state"] = gSaveContext.save;
     // TODO: Manually update scene flags from actorCtx
+
+    // Hack to reduce the amount of bytes for this data
+    if (IS_RANDO) {
+        payload["state"]["shipSaveInfo"]["rando"].erase("randoSaveChecks");
+        payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"] = json::array();
+        for (int i = 0; i < RC_MAX; i++) {
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i] = json::array();
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i][0] = RANDO_SAVE_CHECKS[i].randoItemId;
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i][1] = (u8)RANDO_SAVE_CHECKS[i].shuffled;
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i][2] = (u8)RANDO_SAVE_CHECKS[i].eligible;
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i][3] = (u8)RANDO_SAVE_CHECKS[i].cycleObtained;
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i][4] = (u8)RANDO_SAVE_CHECKS[i].obtained;
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i][5] = (u8)RANDO_SAVE_CHECKS[i].skipped;
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i][6] = RANDO_SAVE_CHECKS[i].price;
+            payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"][i][7] = RANDO_SAVE_CHECKS[i].multiWorldTeamIndex;
+        }
+    }
 
     SendJsonToRemote(payload);
 }
@@ -52,13 +66,30 @@ void Anchor::HandlePacket_UpdateTeamState(nlohmann::json payload) {
     // }
 
     if (payload.contains("state")) {
-        SaveContext loadedData = payload["state"].get<SaveContext>();
+        // Hack to reduce the amount of bytes for this data
+        if (IS_RANDO && payload["state"]["shipSaveInfo"].contains("rando")) {
+            auto stuff = payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecksCopy"].get<std::vector<std::vector<s32>>>();
+            for (int i = 0; i < RC_MAX; i++) {
+                payload["state"]["shipSaveInfo"]["rando"]["randoSaveChecks"][i] = RandoSaveCheck{
+                    (RandoItemId)stuff[i][0],
+                    (bool)stuff[i][1],
+                    (bool)stuff[i][2],
+                    (bool)stuff[i][3],
+                    (bool)stuff[i][4],
+                    (bool)stuff[i][5],
+                    (u16)stuff[i][6],
+                    (s16)stuff[i][7],
+                };
+            }
+        }
+
+        Save loadedData = payload["state"].get<Save>();
 
         // Restore bottle contents (unless it's the Deku Princess)
         for (int i = 0; i < 6; i++) {
             if (gSaveContext.save.saveInfo.inventory.items[SLOT_BOTTLE_1 + i] != ITEM_NONE &&
                 gSaveContext.save.saveInfo.inventory.items[SLOT_BOTTLE_1 + i] != ITEM_DEKU_PRINCESS) {
-                loadedData.save.saveInfo.inventory.items[SLOT_BOTTLE_1 + i] =
+                loadedData.saveInfo.inventory.items[SLOT_BOTTLE_1 + i] =
                     gSaveContext.save.saveInfo.inventory.items[SLOT_BOTTLE_1 + i];
             }
         }
@@ -66,11 +97,16 @@ void Anchor::HandlePacket_UpdateTeamState(nlohmann::json payload) {
         // Restore ammo if it's non-zero, unless it's beans
         for (int i = 0; i < ARRAY_COUNT(gSaveContext.save.saveInfo.inventory.ammo); i++) {
             if (gSaveContext.save.saveInfo.inventory.ammo[i] != 0 && i != SLOT(ITEM_MAGIC_BEANS)) {
-                loadedData.save.saveInfo.inventory.ammo[i] = gSaveContext.save.saveInfo.inventory.ammo[i];
+                loadedData.saveInfo.inventory.ammo[i] = gSaveContext.save.saveInfo.inventory.ammo[i];
             }
         }
 
-        gSaveContext.save.saveInfo.inventory = loadedData.save.saveInfo.inventory;
+        // Restore checksum
+        loadedData.saveInfo.checksum = gSaveContext.save.saveInfo.checksum;
+        memcpy(loadedData.saveInfo.playerData.newf, gSaveContext.save.saveInfo.playerData.newf, sizeof(loadedData.saveInfo.playerData.newf));
+
+        gSaveContext.save.saveInfo = loadedData.saveInfo;
+        gSaveContext.save.shipSaveInfo = loadedData.shipSaveInfo;
 
         Notification::Emit({
             .message = "Save updated from team",

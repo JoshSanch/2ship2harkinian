@@ -31,7 +31,7 @@ void Anchor::HandlePacket_RequestTeamState(nlohmann::json payload) {
         return;
     }
 
-    SendPacket_UpdateTeamState();
+    SendPacket_UpdateTeamState(CVarGetString("gNetwork.Anchor.TeamId", "default"));
 }
 
 #endif // ENABLE_NETWORKING

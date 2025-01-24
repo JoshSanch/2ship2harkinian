@@ -13,6 +13,10 @@
  */
 
 void Anchor::SendPacket_UnsetFlag(s16 sceneId, s16 flagType, s16 flag) {
+    if (!IsSaveLoaded()) {
+        return;
+    }
+
     nlohmann::json payload;
     payload["type"] = UNSET_FLAG;
     payload["targetTeamId"] = CVarGetString("gNetwork.Anchor.TeamId", "default");

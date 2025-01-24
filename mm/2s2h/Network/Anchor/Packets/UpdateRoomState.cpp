@@ -19,6 +19,7 @@ nlohmann::json Anchor::PrepRoomState() {
     nlohmann::json payload;
     payload["ownerClientId"] = ownClientId;
     payload["pvpMode"] = CVarGetInteger("gNetwork.Anchor.RoomSettings.pvpMode", 0);
+    payload["teams"] = roomState.teams;
 
     return payload;
 }
@@ -38,6 +39,7 @@ void Anchor::HandlePacket_UpdateRoomState(nlohmann::json payload) {
 
     roomState.ownerClientId = payload["state"]["ownerClientId"].get<uint32_t>();
     roomState.pvpMode = payload["state"]["pvpMode"].get<u8>();
+    roomState.teams = payload["state"]["teams"].get<std::vector<std::string>>();
 }
 
 #endif // ENABLE_NETWORKING

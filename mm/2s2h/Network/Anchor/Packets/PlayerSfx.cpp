@@ -30,7 +30,7 @@ void Anchor::SendPacket_PlayerSfx(u16 sfxId) {
     payload["quiet"] = true;
 
     for (auto& [clientId, client] : clients) {
-        if (client.sceneId == gPlayState->sceneId && client.online && client.isSaveLoaded) {
+        if (client.sceneId == gPlayState->sceneId && client.online && client.isSaveLoaded && !client.self) {
             payload["targetClientId"] = clientId;
             SendJsonToRemote(payload);
         }
@@ -38,6 +38,10 @@ void Anchor::SendPacket_PlayerSfx(u16 sfxId) {
 }
 
 void Anchor::HandlePacket_PlayerSfx(nlohmann::json payload) {
+    if (!IsSaveLoaded()) {
+        return;
+    }
+
     uint32_t clientId = payload["clientId"].get<uint32_t>();
     u16 sfxId = payload["sfxId"].get<u16>();
 

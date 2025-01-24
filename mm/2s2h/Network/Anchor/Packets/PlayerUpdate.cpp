@@ -28,7 +28,7 @@ void Anchor::SendPacket_PlayerUpdate() {
 
     uint32_t currentPlayerCount = 0;
     for (auto& [clientId, client] : clients) {
-        if (client.sceneId == gPlayState->sceneId && client.online && client.isSaveLoaded) {
+        if (client.sceneId == gPlayState->sceneId && client.online && client.isSaveLoaded && !client.self) {
             currentPlayerCount++;
         }
     }
@@ -65,7 +65,7 @@ void Anchor::SendPacket_PlayerUpdate() {
     payload["quiet"] = true;
 
     for (auto& [clientId, client] : clients) {
-        if (client.sceneId == gPlayState->sceneId && client.online && client.isSaveLoaded) {
+        if (client.sceneId == gPlayState->sceneId && client.online && client.isSaveLoaded && !client.self) {
             payload["targetClientId"] = clientId;
             SendJsonToRemote(payload);
         }

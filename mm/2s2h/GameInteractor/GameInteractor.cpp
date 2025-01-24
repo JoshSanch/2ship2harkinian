@@ -66,6 +66,10 @@ void GameInteractor_ExecuteAfterEndOfCycleSave() {
     GameInteractor::Instance->ExecuteHooks<GameInteractor::AfterEndOfCycleSave>();
 }
 
+void GameInteractor_ExecuteAfterOwlSave() {
+    GameInteractor::Instance->ExecuteHooks<GameInteractor::AfterOwlSave>();
+}
+
 void GameInteractor_ExecuteBeforeMoonCrashSaveReset() {
     GameInteractor::Instance->ExecuteHooks<GameInteractor::BeforeMoonCrashSaveReset>();
 }

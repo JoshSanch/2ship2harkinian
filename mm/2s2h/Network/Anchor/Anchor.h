@@ -6,6 +6,7 @@
 #include "2s2h/Network/Network.h"
 #include <libultraship/libultraship.h>
 #include "build.h"
+#include "2s2h/Rando/Rando.h"
 
 extern "C" {
 #include "variables.h"
@@ -58,6 +59,7 @@ typedef struct {
 typedef struct {
     uint32_t ownerClientId;
     u8 pvpMode; // 0 = off, 1 = on, 2 = on with friendly fire
+    std::vector<std::string> teams;
 } RoomState;
 
 class Anchor : public Network {
@@ -72,6 +74,7 @@ class Anchor : public Network {
     bool IsSaveLoaded();
     void RegisterHooks();
     void RefreshClientActors();
+    void InitializeMultiWorld();
     void HandlePacket_AllClientState(nlohmann::json payload);
     void HandlePacket_DamagePlayer(nlohmann::json payload);
     void HandlePacket_DisableAnchor(nlohmann::json payload);
@@ -82,6 +85,7 @@ class Anchor : public Network {
     void HandlePacket_RequestTeamState(nlohmann::json payload);
     void HandlePacket_RequestTeleport(nlohmann::json payload);
     void HandlePacket_ServerMessage(nlohmann::json payload);
+    void HandlePacket_SetCheckStatus(nlohmann::json payload);
     void HandlePacket_SetFlag(nlohmann::json payload);
     void HandlePacket_TeleportTo(nlohmann::json payload);
     void HandlePacket_UnsetFlag(nlohmann::json payload);
@@ -105,6 +109,7 @@ class Anchor : public Network {
     inline static const std::string REQUEST_TEAM_STATE = "REQUEST_TEAM_STATE";
     inline static const std::string REQUEST_TELEPORT = "REQUEST_TELEPORT";
     inline static const std::string SERVER_MESSAGE = "SERVER_MESSAGE";
+    inline static const std::string SET_CHECK_STATUS = "SET_CHECK_STATUS";
     inline static const std::string SET_FLAG = "SET_FLAG";
     inline static const std::string TELEPORT_TO = "TELEPORT_TO";
     inline static const std::string UNSET_FLAG = "UNSET_FLAG";
@@ -128,19 +133,20 @@ class Anchor : public Network {
 
     void SendPacket_DamagePlayer(u32 clientId, u8 damageEffect, u8 damage);
     void SendPacket_GameComplete();
-    void SendPacket_GiveItem(u16 modId, s16 getItemId);
+    void SendPacket_GiveItem(u16 modId, s16 getItemId, std::string targetTeamId = "");
     void SendPacket_Handshake();
     void SendPacket_PlayerSfx(u16 sfxId);
     void SendPacket_PlayerUpdate();
     void SendPacket_RequestTeamState();
     void SendPacket_RequestTeleport(u32 clientId);
+    void SendPacket_SetCheckStatus(RandoCheckId randoCheckId);
     void SendPacket_SetFlag(s16 sceneId, s16 flagType, s16 flag);
     void SendPacket_TeleportTo(u32 clientId);
     void SendPacket_UnsetFlag(s16 sceneId, s16 flagType, s16 flag);
     void SendPacket_UpdateClientState();
     void SendPacket_UpdateDungeonItems();
     void SendPacket_UpdateRoomState();
-    void SendPacket_UpdateTeamState();
+    void SendPacket_UpdateTeamState(std::string targetTeamId);
 };
 
 typedef enum {

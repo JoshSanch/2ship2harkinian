@@ -28,7 +28,9 @@ std::map<std::pair<float, float>, RandoCheckId> freestandingMap = {
 };
 
 void Rando::ActorBehavior::InitEnItem00Behavior() {
+    SPDLOG_INFO("Initializing EnItem00 behavior");
     COND_ID_HOOK(ShouldActorInit, ACTOR_EN_ITEM00, IS_RANDO, [](Actor* actor, bool* should) {
+        SPDLOG_INFO("EnItem00 behavior hook");
         EnItem00* item00 = (EnItem00*)actor;
 
         // If it's one of our items ignore it
@@ -54,12 +56,16 @@ void Rando::ActorBehavior::InitEnItem00Behavior() {
 
         auto randoSaveCheck = RANDO_SAVE_CHECKS[randoStaticCheck.randoCheckId];
 
-        if (!randoSaveCheck.shuffled || randoSaveCheck.cycleObtained) {
+        if (!randoSaveCheck.shuffled) {
             return;
         }
 
         // Prevent the original item from spawning
         *should = false;
+
+        if (randoSaveCheck.cycleObtained) {
+            return;
+        }
 
         // If it hasn't been collected yet, spawn a dummy item
         CustomItem::Spawn(

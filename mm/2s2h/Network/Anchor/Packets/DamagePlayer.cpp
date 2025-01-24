@@ -31,6 +31,10 @@ void Anchor::SendPacket_DamagePlayer(u32 clientId, u8 damageEffect, u8 damage) {
 }
 
 void Anchor::HandlePacket_DamagePlayer(nlohmann::json payload) {
+    if (!IsSaveLoaded()) {
+        return;
+    }
+
     uint32_t clientId = payload["clientId"].get<uint32_t>();
     if (!clients.contains(clientId) || clients[clientId].player == nullptr) {
         return;
