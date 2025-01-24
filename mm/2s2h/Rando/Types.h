@@ -1719,6 +1719,7 @@ typedef enum {
     RO_SHUFFLE_OWL_STATUES,
     RO_SHUFFLE_SHOPS,
     RO_SHUFFLE_BOSS_REMAINS,
+    RO_PLENTIFUL,
     RO_MAX,
 } RandoOptionId;
 

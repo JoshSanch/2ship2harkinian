@@ -75,6 +75,20 @@ void ApplyNoLogicToSaveContext() {
         itemPool.push_back(RI_SHIELD_HERO);
     }
 
+    if (RANDO_SAVE_OPTIONS[RO_PLENTIFUL] == RO_GENERIC_YES) {
+        // Duplicate all non health/junk items in the pool
+        std::vector<RandoItemId> plentifulItems;
+        for (size_t i = 0; i < itemPool.size(); i++) {
+            if (Rando::StaticData::Items[itemPool[i]].randoItemType != RITYPE_HEALTH &&
+                Rando::StaticData::Items[itemPool[i]].randoItemType != RITYPE_JUNK) {
+                plentifulItems.push_back(itemPool[i]);
+            }
+        }
+        for (RandoItemId plentifulItem : plentifulItems) {
+            itemPool.push_back(plentifulItem);
+        }
+    }
+
     // Add other items that don't have a vanilla location like Sun's Song or Song of Double Time
 
     // Remove starting items from the pool (but only one per entry in startingItems)

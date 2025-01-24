@@ -249,6 +249,19 @@ void Anchor::InitializeMultiWorld() {
         // nlohmann::json spoiler = Rando::Spoiler::LoadFromFile(roomState.teams[i]);
         // Rando::Spoiler::ApplyToSaveContext(spoiler);
         Rando::MiscBehavior::OnFileCreate(0);
+        std::vector<RandoItemId> startingItems = {
+            RI_SWORD_KOKIRI,
+            RI_SHIELD_HERO,
+            RI_OCARINA,
+            RI_SONG_TIME,
+        };
+
+        // Grant the starting items
+        for (RandoItemId startingItem : startingItems) {
+            Rando::GiveItem(Rando::ConvertItem(startingItem));
+        }
+        RANDO_SAVE_CHECKS[RC_STARTING_ITEM_DEKU_MASK].eligible = true;
+        RANDO_SAVE_CHECKS[RC_STARTING_ITEM_SONG_OF_HEALING].eligible = true;
         for (auto& [randoCheckId, randoStaticCheck] : Rando::StaticData::Checks) {
             if (RANDO_SAVE_CHECKS[randoCheckId].shuffled) {
                 checkPool.push_back({ randoCheckId, i });
